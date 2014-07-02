@@ -3,7 +3,7 @@ include 'vimeo-config.php';
 include 'vimeo-lib/vimeo.php';
 
 function download($url, $file_target) {
-    set_time_limit(0);
+  set_time_limit(0);
 	$fp = fopen (dirname(__FILE__) . '/'. $file_target, 'w+');//This is the file where we save the    information
 	$ch = curl_init(str_replace(" ","%20",$url));//Here is the file we are downloading, replace spaces with %20
 	curl_setopt($ch, CURLOPT_TIMEOUT, 50);
@@ -15,11 +15,29 @@ function download($url, $file_target) {
 }
 
 $link = mysqli_connect(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
-$link_update = mysqli_connect(DB_HOST, DB_USER, DB_PASSWORD, DB_NAME);
 $lib = new Vimeo(oauth_clientid, oauth_clientsecret, oauth_token); 
 
-//$me = $lib->request('/me');
-//print_r($me["body"]["upload_quota"]["space"]["free"]); die();
+/*
+// check on quota
+$me = $lib->request('/me');
+print_r($me["body"]["upload_quota"]["space"]["free"]); die();
+*/
+
+/*
+// delete all videos on account
+$videos = $lib->request('/me/videos', array(
+	'per_page' => 100
+));
+//print_r($videos["body"]["data"]); die();
+foreach ($videos["body"]["data"] as $key => $video) {
+	print "Deleting ". $video["uri"] . "\n";
+	$patch_response = $lib->request($video["uri"], array(
+		'name' => $row['post_title'],
+		'description' => $row['post_content']
+	), 'DELETE');
+}
+die();
+*/
 
 // list videos in WP, with MOV Attachment
 $wp_videos = $link->query("
@@ -45,6 +63,9 @@ where
 	p.post_type = 'mp_video'
 ");
 
+if (!is_dir("temp")) {
+    mkdir("temp");         
+}
 // iterate WP videos
 while ($row = $wp_videos->fetch_assoc()) {
 	echo "Working on ". $row['post_title'] ."\n";
@@ -77,7 +98,7 @@ while ($row = $wp_videos->fetch_assoc()) {
 			
 			// Save Vimeo ID on WP video
 			preg_match("/\/(\d+)$/", $uri, $vimeo_match);
-			print_r($uri);
+			//print_r($uri);
 			$vimeo_id = $vimeo_match[1];
 		} catch (VimeoUploadException $e) {
 			//  We may have had an error.  We can't resolve it here necessarily, so report it to the user.
@@ -104,7 +125,14 @@ while ($row = $wp_videos->fetch_assoc()) {
 		
 		if($patch_response["status"] == 204){
 			echo "Updating WordPress $vimeo_id \n";
-			$link_update->query("DELETE FROM wp_postmeta WHERE post_id = ".$row["ID"]." and meta_key = 'vimeo_url'; INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (".$row["ID"].", 'vimeo_url', 'http://vimeo.com/".$vimeo_id."')");
+
+			$link_update = new PDO('mysql:host='.DB_HOST.';dbname='.DB_NAME.';charset=utf8', DB_USER, DB_PASSWORD);
+			
+			$sql = "DELETE FROM wp_postmeta WHERE post_id = :post_id and meta_key = 'vimeo_url'; INSERT INTO wp_postmeta (post_id, meta_key, meta_value) VALUES (:post_id, 'vimeo_url', :vimeo_url)";
+			$stmt = $link_update->prepare($sql);
+			$update_result = $stmt->execute(array(':post_id' => $row["ID"], ':vimeo_url' => "http://vimeo.com/$vimeo_id"));
+
+			unset($link_update);
 		}
 	} catch (Exception $e) {
 		//  We may have had an error.  We can't resolve it here necessarily, so report it to the user.
